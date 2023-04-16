@@ -27,6 +27,10 @@ async fn main() {
         .unwrap();
 }
 
+async fn webhook() -> StatusCode {
+    StatusCode::FORBIDDEN
+}
+
 async fn redirect() -> Redirect {
     Redirect::temporary("https://github.com/harmless-tech/test-github-app")
 }
