@@ -5,6 +5,7 @@ use axum::{
 };
 use bb8_redis::RedisConnectionManager;
 use std::net::SocketAddr;
+use axum::response::Redirect;
 
 #[tokio::main]
 async fn main() {
@@ -15,6 +16,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health/ready", get(|| async { "Ready!".to_string() }))
+        .route("/", get(redirect))
         .fallback(error404)
         .with_state(pool);
 
@@ -23,6 +25,10 @@ async fn main() {
         .serve(app.into_make_service())
         .await
         .unwrap();
+}
+
+async fn redirect() -> Redirect {
+    Redirect::temporary("https://github.com/harmless-tech/test-github-app")
 }
 
 async fn error404(uri: Uri) -> (StatusCode, String) {
