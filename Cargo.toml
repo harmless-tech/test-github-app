@@ -1,0 +1,24 @@
+[package]
+name = "test-github-app"
+version = "0.1.0"
+edition = "2021"
+authors = ["harmless-tech"]
+description = "DEV"
+readme = "README.md"
+license = "MIT"
+#homepage = ""
+repository = "https://github.com/harmless-tech/test-github-app"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = "0.6.15"
+bb8 = "0.8.0"
+bb8-redis = "0.13.0"
+tokio = { version = "1.27.0", features = ["full"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
