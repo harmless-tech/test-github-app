@@ -39,6 +39,21 @@ static GH_APP_KEY: Lazy<EncodingKey> = Lazy::new(|| {
     EncodingKey::from_rsa_pem(secret.as_bytes()).expect("Failed to get RSA private key!")
 });
 
+static REQWEST_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .user_agent(concat!(
+            env!("CARGO_PKG_NAME"),
+            "/",
+            env!("CARGO_PKG_VERSION"),
+        ))
+        .timeout(Duration::new(60, 0))
+        .connection_verbose(true)
+        .min_tls_version(reqwest::tls::Version::TLS_1_2)
+        .https_only(true)
+        .build()
+        .expect("Could not build reqwest client!")
+});
+
 #[derive(Debug, Clone)]
 struct AppState {
     app_id: Arc<RwLock<Option<u64>>>,
@@ -88,7 +103,7 @@ async fn main() {
     let app_state = AppState::new(pool).await;
 
     let app = Router::new()
-        .route("/health/ready", get(|| async { "Ready!".to_string() }))
+        .route("/health/ready", get(health_ready))
         .route("/", get(redirect))
         .route(
             format!("/webhooks/{}", env::var("WEBHOOK_SLUG").unwrap()).as_str(),
@@ -113,69 +128,78 @@ async fn webhook(
     State(app): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<(), StatusCode> {
-    dbg!(&headers); // TODO: Remove!
-    dbg!(&body);
+) -> Result<(), ()> {
+    #[cfg(debug_assertions)]
+    {
+        dbg!(&headers);
+        dbg!(&body);
+    }
 
     let mut mac = {
         use hmac::digest::KeyInit;
-        HmacSha256::new_from_slice(&WEBHOOK_SECRET).map_err(|_| StatusCode::BAD_REQUEST)?
+        HmacSha256::new_from_slice(&WEBHOOK_SECRET).map_err(|_| ())?
     };
     {
         use hmac::Mac;
+
         mac.update(&body);
         match headers.get("x-hub-signature-256") {
-            None => return Err(StatusCode::NOT_FOUND),
+            None => return Err(()),
             Some(val) => {
-                let val = val.to_str().map_err(|_| StatusCode::BAD_REQUEST)?;
+                let val = val.to_str().map_err(|_| ())?;
                 let val = val.replace("sha256=", "");
+                let val = hex::decode(val).expect("Header does not contain sha256 string");
 
-                // TODO: Use constant compare? Does it matter?
-                if mac.verify_slice(val.as_bytes()).is_ok() {
+                if mac.verify_slice(&val).is_err() {
                     tracing::debug!("Webhook signature is wrong.");
-                    return Err(StatusCode::NOT_FOUND);
+                    return Err(());
                 }
             }
         }
     }
 
-    let payload: Value = serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
-    dbg!(&payload); // TODO: Remove!
+    let payload: Value = serde_json::from_slice(&body).map_err(|_| ())?;
+    #[cfg(debug_assertions)]
+    dbg!(&payload);
 
     match payload.get("action") {
         None => panic!("GitHub payload is missing action!"),
-        Some(Value::String(s)) => match s.as_str() {
-            "created" | "new_permissions_accepted" | "unsuspend" => {
-                let pool = pool.get();
+        Some(Value::String(s)) => {
+            tracing::debug!("Handling payload action {s}");
+            match s.as_str() {
+                "created" | "new_permissions_accepted" | "unsuspend" => {
+                    let pool = pool.get();
 
-                let no_app_id = app.app_id.read().await.is_none();
-                if no_app_id {
-                    let app_id = payload["installation"]
-                        .as_object()
-                        .expect("Expected installation to be object")
-                        .get("app_id")
-                        .expect("Expected installation to have key app_id")
-                        .as_u64()
-                        .expect("Expected app_id to be a u64");
+                    let no_app_id = app.app_id.read().await.is_none();
+                    if no_app_id {
+                        let app_id = payload["installation"]
+                            .as_object()
+                            .expect("Expected installation to be object")
+                            .get("app_id")
+                            .expect("Expected installation to have key app_id")
+                            .as_u64()
+                            .expect("Expected app_id to be a u64");
 
-                    let mut conn = pool.await.unwrap();
-                    let reply: String = cmd("SET")
-                        .arg("app_id")
-                        .arg(app_id)
-                        .query_async(&mut *conn)
-                        .await
-                        .unwrap();
-                    tracing::debug!("APP_ID set persist: {reply} to {app_id}");
+                        let mut conn = pool.await.unwrap();
+                        let reply: String = cmd("SET")
+                            .arg("app_id")
+                            .arg(app_id)
+                            .query_async(&mut *conn)
+                            .await
+                            .unwrap();
+                        tracing::debug!("APP_ID set persist: {reply} to {app_id}");
 
-                    let mut f = app.app_id.write().await;
-                    *f = Some(app_id);
+                        let mut f = app.app_id.write().await;
+                        *f = Some(app_id);
+                    }
+
+                    Ok(())
                 }
-
-                Ok(())
+                "" => Ok(()),
+                _ => Err(()),
             }
-            _ => Err(StatusCode::ACCEPTED),
-        },
-        _ => Err(StatusCode::BAD_REQUEST),
+        }
+        _ => Err(()),
     }
 }
 
@@ -203,6 +227,10 @@ fn gen_jwt(iss: u64) -> String {
         &GH_APP_KEY,
     )
     .expect("Could not encode JWT.")
+}
+
+async fn health_ready() -> String {
+    "Ready!".to_string()
 }
 
 async fn redirect() -> Redirect {
