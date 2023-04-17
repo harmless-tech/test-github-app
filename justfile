@@ -10,7 +10,26 @@ check:
 
 redis-start:
     export REDIS_URL=redis://default@localhost:6379
-    docker run -d --name test-redis-ga --rm -p 6379:6379 redis:alpine
+    docker run -d --rm --name test-redis-ga -p 6379:6379 redis:alpine
 
 redis-stop:
     docker stop test-redis-ga
+
+init:
+    export WEBHOOK_SLUG=testing
+    export WEBHOOK_SECRET=tty
+    export GH_APP_KEY="$(cat priv-key.pem)"
+
+dbuild:
+    docker buildx build -f Dockerfile.dev -t test-gh-app .
+
+dbuild-release:
+    docker buildx build --build-arg BUILD_PROFILE=release -f Dockerfile.dev -t test-gh-app .
+
+redis_ip := `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' test-redis-ga | xargs basename`
+drun:
+    docker run --rm --name test-app-ga -p 3000:3000 -e REDIS_URL=redis://default@{{redis_ip}}:6379 -e WEBHOOK_SLUG -e WEBHOOK_SECRET -e GH_APP_KEY test-gh-app
+
+dd:
+    just dbuild
+    just drun
