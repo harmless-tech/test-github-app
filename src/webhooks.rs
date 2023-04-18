@@ -12,8 +12,9 @@ use axum::{
 };
 use bb8_redis::redis::cmd;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::env;
+use reqwest::{Error, Response};
 use tower_http::{limit::RequestBodyLimitLayer, timeout::ResponseBodyTimeoutLayer};
 
 pub async fn get_routes() -> Router<AppState, Body> {
@@ -76,34 +77,51 @@ async fn webhook(
         }
         "issue_comment" => {
             tokio::spawn(async move {
-                let pull_req = payload["issue"]
-                    .as_object()
-                    .unwrap()
-                    .contains_key("pull_request");
+                if payload["action"].as_str().unwrap().eq("created") {
+                    let issue = payload["issue"].as_object().unwrap();
+                    if issue.contains_key("pull_request") {
+                        tracing::debug!("Found issue comment created with pull request.");
+                        let pull_url = issue["pull_request"].as_object().unwrap().get("url").unwrap().as_str().unwrap();
 
-                tracing::debug!("CONTAINS PULL REQUEST: {pull_req}");
+                        if issue["state"].as_str().unwrap().eq("open") && author_association_allowed(issue["author_association"].as_str().unwrap()) {
+                            let mut token = app.access_token.write().await;
+                            let pull_request = token.post(&app.data, pull_url).await.await;
+                            match pull_request {
+                                Ok(res) => match res.status() {
+                                    reqwest::StatusCode::OK => {
+                                        let pull_json: Value = res.json().await.expect("Did not receive json from pull api request.");
+                                        let repo_url = pull_json["repo"].as_object().unwrap().get("url").unwrap().as_str().unwrap(); // TODO: Annoying, guess I should make structs!
+                                        let pull_ref = pull_json["head"].as_object().unwrap().get("ref").unwrap().as_str().unwrap();
 
-                //
-                let mut token = app.access_token.write().await;
+                                        let url = format!("{repo_url}/actions/workflows/{}/dispatches", "test1");
 
-                let r = token
-                    .post(&app.data, "https://harmless.tech")
-                    .await
-                    .unwrap()
-                    .await
-                    .unwrap()
-                    .text()
-                    .await
-                    .unwrap();
-                tracing::debug!("POST OUTPUT: {r}");
-                //
+                                        let mut json_map = Map::new();
+                                        json_map.insert("ref".to_string(), Value::String(pull_ref.to_string()));
+                                        let json = Value::Object(json_map);
+
+                                        let request = token.post_json(&app.data, &url, &json).await.await;
+                                        match request {
+                                            Ok(res) => match res.status() {
+                                                reqwest::StatusCode::NO_CONTENT => tracing::info!("Started workflow {} with {json}", "test1"),
+                                                err => tracing::error!("Pull request api error '{url}': {err}")
+                                            }
+                                            Err(err) => tracing::error!("Pull request api error '{url}': {err}"),
+                                        }
+                                    },
+                                    err => tracing::error!("Pull request api error '{pull_url}': status code {err}"),
+                                }
+                                Err(err) => tracing::error!("Pull request api error '{pull_url}': {err}"),
+                            }
+                        }
+                    }
+                }
             });
 
-            // Check if open
-            // Check author_association
-            // Check if pull request
-            // Call api with url
-            // Get head->ref
+            // Check if open -
+            // Check author_association -
+            // Check if pull request -
+            // Call api with url -
+            // Get head->ref -
             // Call workflow
             // React positive if success, otherwise negative
         }
@@ -113,6 +131,13 @@ async fn webhook(
     }
 
     Ok(())
+}
+
+fn author_association_allowed(association: &str) -> bool {
+    match association {
+        "OWNER" | "MEMBER" | "COLLABORATOR" => true,
+        _ => false
+    }
 }
 
 async fn check_app_id(app: &AppState, pool: &ConnectionPool, payload: &Value) {

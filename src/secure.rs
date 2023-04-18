@@ -3,7 +3,7 @@ use chrono::{DateTime, Duration, Utc};
 use hmac::{digest::core_api::CoreWrapper, Hmac, HmacCore};
 use jsonwebtoken::EncodingKey;
 use once_cell::sync::Lazy;
-use reqwest::{IntoUrl, Response};
+use reqwest::{IntoUrl, RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
@@ -43,19 +43,23 @@ impl AccessToken {
         }
     }
 
-    pub async fn post<U: IntoUrl>(
-        &mut self,
-        app_data: &AppData,
-        url: U,
-    ) -> Result<impl Future<Output = Result<Response, reqwest::Error>>, ()> {
-        let token = self.get_installation_token(app_data).await?;
-        tracing::debug!("POST!");
-        Ok(fetch::CLIENT
+    pub async fn post<U: IntoUrl>(&mut self, app_data: &AppData, url: U) -> impl Future<Output = Result<Response, reqwest::Error>> {
+        let request = self.base_request(app_data, url).await;
+        request.send()
+    }
+
+    pub async fn post_json<U: IntoUrl>(&mut self, app_data: &AppData, url: U, payload: &Value) -> impl Future<Output = Result<Response, reqwest::Error>> {
+        let request = self.base_request(app_data, url).await;
+        request.json(payload).send()
+    }
+
+    async fn base_request<U: IntoUrl>(&mut self, app_data: &AppData, url: U,) -> RequestBuilder {
+        let token = self.get_installation_token(app_data).await.expect("Could not get token");
+        fetch::CLIENT
             .post(url)
             .bearer_auth(token)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
-            .send())
     }
 
     async fn get_installation_token(&mut self, app_data: &AppData) -> Result<String, ()> {
