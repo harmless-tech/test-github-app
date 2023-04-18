@@ -15,6 +15,7 @@ repository = "https://github.com/harmless-tech/test-github-app"
 axum = { version = "0.6.15", features = ["tracing"] }
 bb8 = "0.8.0"
 bb8-redis = "0.13.0"
+chrono = { version = "0.4.24", default-features = false, features = ["clock", "std"] }
 hex = "0.4.3"
 hmac = "0.12.1"
 jsonwebtoken = "8.3.0"

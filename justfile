@@ -9,13 +9,13 @@ check:
     cargo clippy --all-targets --all-features --workspace -- -D warnings
 
 redis-start:
-    export REDIS_URL=redis://default@localhost:6379
     docker run -d --rm --name test-redis-ga -p 6379:6379 redis:alpine
 
 redis-stop:
     docker stop test-redis-ga
 
 init:
+    export REDIS_URL=redis://default@localhost:6379
     export WEBHOOK_SLUG=testing
     export WEBHOOK_SECRET=tty
     export GH_APP_KEY="$(cat priv-key.pem)"
