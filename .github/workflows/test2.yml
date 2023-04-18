@@ -1,0 +1,16 @@
+name: test2
+
+on:
+  workflow_dispatch:
+    inputs:
+      testing-in:
+        type: string
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: git rev-parse HEAD
+      - run: ls -a
+      - run: echo '${{ inputs.testing-in }}'
