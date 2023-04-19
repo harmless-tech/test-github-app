@@ -36,9 +36,6 @@ async fn webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<(), ()> {
-    #[cfg(debug_assertions)]
-    dbg!(&headers);
-
     let event = match headers.get("x-github-event") {
         None => return Err(()),
         Some(val) => val.to_str().unwrap(),
@@ -65,35 +62,58 @@ async fn webhook(
     }
 
     let payload: Value = serde_json::from_slice(&body).map_err(|_| ())?;
-    #[cfg(debug_assertions)]
-    dbg!(&payload);
 
     match event {
         "installation" => {
             tokio::spawn(async move { check_app_id(&app, &pool, &payload).await });
         }
         "issue_comment" => {
-            // TODO: Allow workflow name test and actions arguments.
             tokio::spawn(async move {
                 if payload["action"].as_str().unwrap().eq("created") {
                     let issue = payload["issue"].as_object().unwrap();
+                    let comment = payload["comment"].as_object().unwrap();
                     if issue.contains_key("pull_request") {
                         tracing::debug!("Found issue comment created with pull request.");
-                        let pull_url = issue["pull_request"]
-                            .as_object()
-                            .unwrap()
-                            .get("url")
-                            .unwrap()
-                            .as_str()
-                            .unwrap();
-
                         if issue["state"].as_str().unwrap().eq("open")
                             && author_association_allowed(
-                                issue["author_association"].as_str().unwrap(),
+                                comment["author_association"].as_str().unwrap(),
                             )
                         {
+                            // Parse comment for workflow name and possible args
+                            let contents = comment["body"].as_str().unwrap();
+                            if !contents.starts_with("gta-runner ") {
+                                return;
+                            }
+
+                            let contents = contents[11..].trim();
+                            if contents.is_empty() {
+                                return;
+                            }
+
+                            let i = contents.split_once(' ');
+                            let cmd_info = match i {
+                                None => (contents, None),
+                                Some((s1, s2)) => {
+                                    let v: Value =
+                                        serde_json::from_str(s2).expect("arg received is not json");
+                                    if !v.is_object() {
+                                        return;
+                                    }
+                                    (s1, Some(v))
+                                }
+                            };
+
+                            // Get pull request info
+                            let pull_url = issue["pull_request"]
+                                .as_object()
+                                .unwrap()
+                                .get("url")
+                                .unwrap()
+                                .as_str()
+                                .unwrap();
                             let mut token = app.access_token.write().await;
                             let pull_request = token.get(&app.data, pull_url).await.await;
+
                             match pull_request {
                                 Ok(res) => match res.status() {
                                     reqwest::StatusCode::OK => {
@@ -121,8 +141,8 @@ async fn webhook(
                                             .unwrap();
 
                                         let url = format!(
-                                            "{repo_url}/actions/workflows/{}/dispatches",
-                                            "test1.yml"
+                                            "{repo_url}/actions/workflows/{}.yml/dispatches",
+                                            cmd_info.0
                                         );
 
                                         let mut json_map = Map::new();
@@ -130,6 +150,9 @@ async fn webhook(
                                             "ref".to_string(),
                                             Value::String(pull_ref.to_string()),
                                         );
+                                        if let Some(v) = cmd_info.1 {
+                                            json_map.insert("inputs".to_string(), v);
+                                        }
                                         let json = Value::Object(json_map);
 
                                         let request =
@@ -139,7 +162,7 @@ async fn webhook(
                                                 reqwest::StatusCode::NO_CONTENT => {
                                                     tracing::info!(
                                                         "Started workflow {} with {json}",
-                                                        "test1"
+                                                        cmd_info.0
                                                     );
 
                                                     // React
@@ -167,7 +190,7 @@ async fn webhook(
                                                         .await
                                                         .await
                                                         .expect("Bad request error (reactions)");
-                                                    tracing::debug!("Added reaction for workflow {} with {json} (status code {})", "test1", r.status());
+                                                    tracing::debug!("Added reaction for workflow {} with {json} (status code {})", cmd_info.0, r.status());
                                                 }
                                                 err => tracing::error!(
                                                     "Pull request api error '{url}': {err}"
@@ -178,12 +201,9 @@ async fn webhook(
                                             ),
                                         }
                                     }
-                                    err => {
-                                        tracing::error!("Pull request api error '{pull_url}': status code {err}");
-
-                                        let body = res.text().await.unwrap();
-                                        dbg!(body);
-                                    }
+                                    err => tracing::error!(
+                                        "Pull request api error '{pull_url}': status code {err}"
+                                    ),
                                 },
                                 Err(err) => {
                                     tracing::error!("Pull request api error '{pull_url}': {err}")
