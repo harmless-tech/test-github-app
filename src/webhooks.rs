@@ -81,11 +81,11 @@ async fn webhook(
                         {
                             // Parse comment for workflow name and possible args
                             let contents = comment["body"].as_str().unwrap();
-                            if !contents.starts_with("gta-runner ") {
+                            if !contents.starts_with("!harmful ") {
                                 return;
                             }
 
-                            let contents = contents[11..].trim();
+                            let contents = contents[9..].trim();
                             if contents.is_empty() {
                                 return;
                             }
