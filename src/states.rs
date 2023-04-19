@@ -69,7 +69,7 @@ impl FromRef<AppState> for ConnectionPool {
 
 pub async fn build_app_state() -> AppState {
     let manager = RedisConnectionManager::new(env::var("REDIS_URL").unwrap()).unwrap();
-    let pool = bb8::Pool::builder().build(manager).await.unwrap();
+    let pool = Pool::builder().build(manager).await.unwrap();
 
     AppState::new(pool).await
 }

@@ -43,23 +43,32 @@ impl AccessToken {
         }
     }
 
+    pub async fn get<U: IntoUrl>(&mut self, app_data: &AppData, url: U) -> impl Future<Output = Result<Response, reqwest::Error>> {
+        let token = self.get_installation_token(app_data).await.expect("Could not get token");
+        fetch::CLIENT.get(url).bearer_auth(token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28").send()
+    }
+
     pub async fn post<U: IntoUrl>(&mut self, app_data: &AppData, url: U) -> impl Future<Output = Result<Response, reqwest::Error>> {
-        let request = self.base_request(app_data, url).await;
-        request.send()
+        let token = self.get_installation_token(app_data).await.expect("Could not get token");
+        fetch::CLIENT.post(url).bearer_auth(token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28").send()
     }
 
     pub async fn post_json<U: IntoUrl>(&mut self, app_data: &AppData, url: U, payload: &Value) -> impl Future<Output = Result<Response, reqwest::Error>> {
-        let request = self.base_request(app_data, url).await;
-        request.json(payload).send()
+        let token = self.get_installation_token(app_data).await.expect("Could not get token");
+        fetch::CLIENT.post(url).bearer_auth(token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28").json(payload).send()
     }
 
-    async fn base_request<U: IntoUrl>(&mut self, app_data: &AppData, url: U,) -> RequestBuilder {
+    pub async fn patch_json<U: IntoUrl>(&mut self, app_data: &AppData, url: U, payload: &Value) -> impl Future<Output = Result<Response, reqwest::Error>> {
         let token = self.get_installation_token(app_data).await.expect("Could not get token");
-        fetch::CLIENT
-            .post(url)
-            .bearer_auth(token)
+        fetch::CLIENT.patch(url).bearer_auth(token)
             .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("X-GitHub-Api-Version", "2022-11-28").json(payload).send()
     }
 
     async fn get_installation_token(&mut self, app_data: &AppData) -> Result<String, ()> {
@@ -94,7 +103,7 @@ impl AccessToken {
                 let expiry: DateTime<Utc> = expiry.into();
                 tracing::debug!("New token will expire on: {expiry}");
 
-                self.token = data.get("token").unwrap().to_string();
+                self.token = data.get("token").unwrap().as_str().unwrap().to_string();
                 self.expiry = expiry;
 
                 Ok(self.token.clone())
