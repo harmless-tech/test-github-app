@@ -26,7 +26,8 @@ dbuild:
 dbuild-release:
     docker buildx build -f Dockerfile -t test-gh-app .
 
-redis_ip := `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' test-redis-ga | xargs basename`
+# TODO: Fix this being missing
+redis_ip := `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' test-redis-ga | xargs basename | true`
 drun:
     docker run --rm --name test-app-ga -p 3000:3000 -e REDIS_URL=redis://default@{{redis_ip}}:6379 -e WEBHOOK_SLUG -e WEBHOOK_SECRET -e GH_APP_KEY test-gh-app
 
