@@ -3,7 +3,7 @@ use chrono::{DateTime, Duration, Utc};
 use hmac::{digest::core_api::CoreWrapper, Hmac, HmacCore};
 use jsonwebtoken::EncodingKey;
 use once_cell::sync::Lazy;
-use reqwest::{IntoUrl, RequestBuilder, Response};
+use reqwest::{IntoUrl, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
@@ -43,32 +43,76 @@ impl AccessToken {
         }
     }
 
-    pub async fn get<U: IntoUrl>(&mut self, app_data: &AppData, url: U) -> impl Future<Output = Result<Response, reqwest::Error>> {
-        let token = self.get_installation_token(app_data).await.expect("Could not get token");
-        fetch::CLIENT.get(url).bearer_auth(token)
+    pub async fn get<U: IntoUrl>(
+        &mut self,
+        app_data: &AppData,
+        url: U,
+    ) -> impl Future<Output = Result<Response, reqwest::Error>> {
+        let token = self
+            .get_installation_token(app_data)
+            .await
+            .expect("Could not get token");
+        fetch::CLIENT
+            .get(url)
+            .bearer_auth(token)
             .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28").send()
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
     }
 
-    pub async fn post<U: IntoUrl>(&mut self, app_data: &AppData, url: U) -> impl Future<Output = Result<Response, reqwest::Error>> {
-        let token = self.get_installation_token(app_data).await.expect("Could not get token");
-        fetch::CLIENT.post(url).bearer_auth(token)
+    pub async fn post<U: IntoUrl>(
+        &mut self,
+        app_data: &AppData,
+        url: U,
+    ) -> impl Future<Output = Result<Response, reqwest::Error>> {
+        let token = self
+            .get_installation_token(app_data)
+            .await
+            .expect("Could not get token");
+        fetch::CLIENT
+            .post(url)
+            .bearer_auth(token)
             .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28").send()
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
     }
 
-    pub async fn post_json<U: IntoUrl>(&mut self, app_data: &AppData, url: U, payload: &Value) -> impl Future<Output = Result<Response, reqwest::Error>> {
-        let token = self.get_installation_token(app_data).await.expect("Could not get token");
-        fetch::CLIENT.post(url).bearer_auth(token)
+    pub async fn post_json<U: IntoUrl>(
+        &mut self,
+        app_data: &AppData,
+        url: U,
+        payload: &Value,
+    ) -> impl Future<Output = Result<Response, reqwest::Error>> {
+        let token = self
+            .get_installation_token(app_data)
+            .await
+            .expect("Could not get token");
+        fetch::CLIENT
+            .post(url)
+            .bearer_auth(token)
             .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28").json(payload).send()
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(payload)
+            .send()
     }
 
-    pub async fn patch_json<U: IntoUrl>(&mut self, app_data: &AppData, url: U, payload: &Value) -> impl Future<Output = Result<Response, reqwest::Error>> {
-        let token = self.get_installation_token(app_data).await.expect("Could not get token");
-        fetch::CLIENT.patch(url).bearer_auth(token)
+    pub async fn patch_json<U: IntoUrl>(
+        &mut self,
+        app_data: &AppData,
+        url: U,
+        payload: &Value,
+    ) -> impl Future<Output = Result<Response, reqwest::Error>> {
+        let token = self
+            .get_installation_token(app_data)
+            .await
+            .expect("Could not get token");
+        fetch::CLIENT
+            .patch(url)
+            .bearer_auth(token)
             .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28").json(payload).send()
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(payload)
+            .send()
     }
 
     async fn get_installation_token(&mut self, app_data: &AppData) -> Result<String, ()> {

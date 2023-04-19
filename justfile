@@ -21,10 +21,10 @@ init:
     export GH_APP_KEY="$(cat priv-key.pem)"
 
 dbuild:
-    docker buildx build -f Dockerfile.dev -t test-gh-app .
+    docker buildx build -f Dockerfile --build-arg BUILD_PROFILE=dev -t test-gh-app .
 
 dbuild-release:
-    docker buildx build --build-arg BUILD_PROFILE=release -f Dockerfile.dev -t test-gh-app .
+    docker buildx build -f Dockerfile -t test-gh-app .
 
 redis_ip := `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' test-redis-ga | xargs basename`
 drun:

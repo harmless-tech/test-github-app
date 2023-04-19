@@ -10,11 +10,10 @@ use axum::{
     routing::post,
     Router,
 };
-use bb8_redis::redis::{AsyncCommands, cmd, Cmd};
+use bb8_redis::redis::cmd;
 
 use serde_json::{Map, Value};
 use std::env;
-use reqwest::{Error, Response};
 use tower_http::{limit::RequestBodyLimitLayer, timeout::ResponseBodyTimeoutLayer};
 
 pub async fn get_routes() -> Router<AppState, Body> {
@@ -69,72 +68,126 @@ async fn webhook(
     #[cfg(debug_assertions)]
     dbg!(&payload);
 
-    // TODO: Handlers!!!
-
     match event {
         "installation" => {
-            tokio::spawn(async move {
-                check_app_id(&app, &pool, &payload).await
-            });
+            tokio::spawn(async move { check_app_id(&app, &pool, &payload).await });
         }
-        "issue_comment" => { // TODO: Allow workflow name test and actions arguments.
+        "issue_comment" => {
+            // TODO: Allow workflow name test and actions arguments.
             tokio::spawn(async move {
                 if payload["action"].as_str().unwrap().eq("created") {
                     let issue = payload["issue"].as_object().unwrap();
                     if issue.contains_key("pull_request") {
                         tracing::debug!("Found issue comment created with pull request.");
-                        let pull_url = issue["pull_request"].as_object().unwrap().get("url").unwrap().as_str().unwrap();
+                        let pull_url = issue["pull_request"]
+                            .as_object()
+                            .unwrap()
+                            .get("url")
+                            .unwrap()
+                            .as_str()
+                            .unwrap();
 
-                        if issue["state"].as_str().unwrap().eq("open") && author_association_allowed(issue["author_association"].as_str().unwrap()) {
+                        if issue["state"].as_str().unwrap().eq("open")
+                            && author_association_allowed(
+                                issue["author_association"].as_str().unwrap(),
+                            )
+                        {
                             let mut token = app.access_token.write().await;
                             let pull_request = token.get(&app.data, pull_url).await.await;
                             match pull_request {
                                 Ok(res) => match res.status() {
                                     reqwest::StatusCode::OK => {
-                                        let pull_json: Value = res.json().await.expect("Did not receive json from pull api request.");
-                                        let repo_url = pull_json["base"].as_object().unwrap()
-                                            .get("repo").unwrap().as_object().unwrap()
-                                            .get("url").unwrap().as_str().unwrap();
-                                        let pull_ref = pull_json["head"].as_object().unwrap()
-                                            .get("ref").unwrap().as_str().unwrap();
+                                        let pull_json: Value = res
+                                            .json()
+                                            .await
+                                            .expect("Did not receive json from pull api request.");
+                                        let repo_url = pull_json["base"]
+                                            .as_object()
+                                            .unwrap()
+                                            .get("repo")
+                                            .unwrap()
+                                            .as_object()
+                                            .unwrap()
+                                            .get("url")
+                                            .unwrap()
+                                            .as_str()
+                                            .unwrap();
+                                        let pull_ref = pull_json["head"]
+                                            .as_object()
+                                            .unwrap()
+                                            .get("ref")
+                                            .unwrap()
+                                            .as_str()
+                                            .unwrap();
 
-                                        let url = format!("{repo_url}/actions/workflows/{}/dispatches", "test1.yml");
+                                        let url = format!(
+                                            "{repo_url}/actions/workflows/{}/dispatches",
+                                            "test1.yml"
+                                        );
 
                                         let mut json_map = Map::new();
-                                        json_map.insert("ref".to_string(), Value::String(pull_ref.to_string()));
+                                        json_map.insert(
+                                            "ref".to_string(),
+                                            Value::String(pull_ref.to_string()),
+                                        );
                                         let json = Value::Object(json_map);
 
-                                        let request = token.post_json(&app.data, &url, &json).await.await;
+                                        let request =
+                                            token.post_json(&app.data, &url, &json).await.await;
                                         match request {
                                             Ok(res) => match res.status() {
                                                 reqwest::StatusCode::NO_CONTENT => {
-                                                    tracing::info!("Started workflow {} with {json}", "test1");
+                                                    tracing::info!(
+                                                        "Started workflow {} with {json}",
+                                                        "test1"
+                                                    );
 
                                                     // React
-                                                    let react_url = payload["comment"].as_object().unwrap()
-                                                        .get("reactions").unwrap().as_object().unwrap()
-                                                        .get("url").unwrap().as_str().unwrap();
+                                                    let react_url = payload["comment"]
+                                                        .as_object()
+                                                        .unwrap()
+                                                        .get("reactions")
+                                                        .unwrap()
+                                                        .as_object()
+                                                        .unwrap()
+                                                        .get("url")
+                                                        .unwrap()
+                                                        .as_str()
+                                                        .unwrap();
 
                                                     let mut json_map = Map::new();
-                                                    json_map.insert("content".to_string(), Value::String("rocket".to_string()));
+                                                    json_map.insert(
+                                                        "content".to_string(),
+                                                        Value::String("rocket".to_string()),
+                                                    );
                                                     let json = Value::Object(json_map);
 
-                                                    let r = token.post_json(&app.data, react_url, &json).await.await.expect("Bad request error (reactions)");
+                                                    let r = token
+                                                        .post_json(&app.data, react_url, &json)
+                                                        .await
+                                                        .await
+                                                        .expect("Bad request error (reactions)");
                                                     tracing::debug!("Added reaction for workflow {} with {json} (status code {})", "test1", r.status());
-                                                },
-                                                err => tracing::error!("Pull request api error '{url}': {err}")
-                                            }
-                                            Err(err) => tracing::error!("Pull request api error '{url}': {err}"),
+                                                }
+                                                err => tracing::error!(
+                                                    "Pull request api error '{url}': {err}"
+                                                ),
+                                            },
+                                            Err(err) => tracing::error!(
+                                                "Pull request api error '{url}': {err}"
+                                            ),
                                         }
-                                    },
+                                    }
                                     err => {
                                         tracing::error!("Pull request api error '{pull_url}': status code {err}");
 
                                         let body = res.text().await.unwrap();
                                         dbg!(body);
                                     }
+                                },
+                                Err(err) => {
+                                    tracing::error!("Pull request api error '{pull_url}': {err}")
                                 }
-                                Err(err) => tracing::error!("Pull request api error '{pull_url}': {err}"),
                             }
                         }
                     }
@@ -147,7 +200,15 @@ async fn webhook(
                 match payload["action"].as_str().unwrap() {
                     "requested" => {
                         let workflow_run = payload["workflow_run"].as_object().unwrap();
-                        if workflow_run["actor"].as_object().unwrap().get("id").unwrap().as_u64().unwrap() == 130938523 {
+                        if workflow_run["actor"]
+                            .as_object()
+                            .unwrap()
+                            .get("id")
+                            .unwrap()
+                            .as_u64()
+                            .unwrap()
+                            == 130938523
+                        {
                             let id = workflow_run["id"].as_u64().unwrap();
                             let name = workflow_run["display_title"].as_str().unwrap();
                             let head_sha = workflow_run["head_sha"].as_str().unwrap();
@@ -155,16 +216,31 @@ async fn webhook(
                             let started_at = workflow_run["run_started_at"].as_str().unwrap();
                             let status = workflow_run["status"].as_str().unwrap();
 
-                            let url = workflow_run["head_repository"].as_object().unwrap()
-                                .get("url").unwrap().as_str().unwrap();
+                            let url = workflow_run["head_repository"]
+                                .as_object()
+                                .unwrap()
+                                .get("url")
+                                .unwrap()
+                                .as_str()
+                                .unwrap();
                             let url = format!("{url}/check-runs");
 
                             let mut json_map = Map::new();
                             json_map.insert("name".to_string(), Value::String(name.to_string()));
-                            json_map.insert("head_sha".to_string(), Value::String(head_sha.to_string()));
-                            json_map.insert("details_url".to_string(), Value::String(details_url.to_string()));
-                            json_map.insert("started_at".to_string(), Value::String(started_at.to_string()));
-                            json_map.insert("status".to_string(), Value::String(status.to_string()));
+                            json_map.insert(
+                                "head_sha".to_string(),
+                                Value::String(head_sha.to_string()),
+                            );
+                            json_map.insert(
+                                "details_url".to_string(),
+                                Value::String(details_url.to_string()),
+                            );
+                            json_map.insert(
+                                "started_at".to_string(),
+                                Value::String(started_at.to_string()),
+                            );
+                            json_map
+                                .insert("status".to_string(), Value::String(status.to_string()));
                             let json = Value::Object(json_map);
 
                             let mut token = app.access_token.write().await;
@@ -172,43 +248,75 @@ async fn webhook(
                             match request {
                                 Ok(res) => match res.status() {
                                     reqwest::StatusCode::CREATED => {
-                                        let cr_json: Value = res.json().await.expect("Did not receive json from cr create api request.");
+                                        let cr_json: Value = res.json().await.expect(
+                                            "Did not receive json from cr create api request.",
+                                        );
                                         let cr_id = cr_json["id"].as_u64().unwrap();
-                                        tracing::info!("Created check run {cr_id} for workflow {id}");
+                                        tracing::info!(
+                                            "Created check run {cr_id} for workflow {id}"
+                                        );
 
                                         let mut conn1 = pool.get().await.unwrap();
-                                        let reply: String = cmd("SET").arg(format!("workflow_cr.{id}")).arg(cr_id).query_async(&mut *conn1).await.unwrap();
+                                        let reply: String = cmd("SET")
+                                            .arg(format!("workflow_cr.{id}"))
+                                            .arg(cr_id)
+                                            .query_async(&mut *conn1)
+                                            .await
+                                            .unwrap();
                                         tracing::debug!("Set workflow cr {id} to {cr_id}: {reply}");
 
                                         let mut conn2 = pool.get().await.unwrap();
-                                        let _: usize = cmd("EXPIRE").arg(format!("workflow_cr.{id}")).arg(21600).query_async(&mut *conn2).await.unwrap();
-                                    },
-                                    err => tracing::error!("Check run api error '{url}': {err}")
-                                }
+                                        let _: usize = cmd("EXPIRE")
+                                            .arg(format!("workflow_cr.{id}"))
+                                            .arg(21600)
+                                            .query_async(&mut *conn2)
+                                            .await
+                                            .unwrap();
+                                    }
+                                    err => tracing::error!("Check run api error '{url}': {err}"),
+                                },
                                 Err(err) => tracing::error!("Check run api error '{url}': {err}"),
                             }
                         }
                     }
                     "in_progress" => {
                         let workflow_run = payload["workflow_run"].as_object().unwrap();
-                        if workflow_run["actor"].as_object().unwrap().get("id").unwrap().as_u64().unwrap() == 130938523 {
+                        if workflow_run["actor"]
+                            .as_object()
+                            .unwrap()
+                            .get("id")
+                            .unwrap()
+                            .as_u64()
+                            .unwrap()
+                            == 130938523
+                        {
                             let id = workflow_run["id"].as_u64().unwrap();
                             let status = workflow_run["status"].as_str().unwrap();
 
                             let mut conn = pool.get().await.unwrap();
-                            let reply: Option<u64> = cmd("GET").arg(format!("workflow_cr.{id}")).query_async(&mut *conn).await.unwrap();
+                            let reply: Option<u64> = cmd("GET")
+                                .arg(format!("workflow_cr.{id}"))
+                                .query_async(&mut *conn)
+                                .await
+                                .unwrap();
                             tracing::debug!("Get workflow cr {id}: {reply:?}");
                             let cr_id = match reply {
                                 None => return,
                                 Some(cr) => cr,
                             };
 
-                            let url = workflow_run["head_repository"].as_object().unwrap()
-                                .get("url").unwrap().as_str().unwrap();
+                            let url = workflow_run["head_repository"]
+                                .as_object()
+                                .unwrap()
+                                .get("url")
+                                .unwrap()
+                                .as_str()
+                                .unwrap();
                             let url = format!("{url}/check-runs/{cr_id}");
 
                             let mut json_map = Map::new();
-                            json_map.insert("status".to_string(), Value::String(status.to_string()));
+                            json_map
+                                .insert("status".to_string(), Value::String(status.to_string()));
                             let json = Value::Object(json_map);
 
                             let mut token = app.access_token.write().await;
@@ -224,28 +332,52 @@ async fn webhook(
                     }
                     "completed" => {
                         let workflow_run = payload["workflow_run"].as_object().unwrap();
-                        if workflow_run["actor"].as_object().unwrap().get("id").unwrap().as_u64().unwrap() == 130938523 {
+                        if workflow_run["actor"]
+                            .as_object()
+                            .unwrap()
+                            .get("id")
+                            .unwrap()
+                            .as_u64()
+                            .unwrap()
+                            == 130938523
+                        {
                             let id = workflow_run["id"].as_u64().unwrap();
                             let status = workflow_run["status"].as_str().unwrap();
                             let conclusion = workflow_run["conclusion"].as_str().unwrap();
                             let completed_at = workflow_run["updated_at"].as_str().unwrap();
 
                             let mut conn = pool.get().await.unwrap();
-                            let reply: Option<u64> = cmd("GET").arg(format!("workflow_cr.{id}")).query_async(&mut *conn).await.unwrap();
+                            let reply: Option<u64> = cmd("GET")
+                                .arg(format!("workflow_cr.{id}"))
+                                .query_async(&mut *conn)
+                                .await
+                                .unwrap();
                             tracing::debug!("Get workflow cr {id}: {reply:?}");
                             let cr_id = match reply {
                                 None => return,
                                 Some(cr) => cr,
                             };
 
-                            let url = workflow_run["head_repository"].as_object().unwrap()
-                                .get("url").unwrap().as_str().unwrap();
+                            let url = workflow_run["head_repository"]
+                                .as_object()
+                                .unwrap()
+                                .get("url")
+                                .unwrap()
+                                .as_str()
+                                .unwrap();
                             let url = format!("{url}/check-runs/{cr_id}");
 
                             let mut json_map = Map::new();
-                            json_map.insert("status".to_string(), Value::String(status.to_string()));
-                            json_map.insert("conclusion".to_string(), Value::String(conclusion.to_string()));
-                            json_map.insert("completed_at".to_string(), Value::String(completed_at.to_string()));
+                            json_map
+                                .insert("status".to_string(), Value::String(status.to_string()));
+                            json_map.insert(
+                                "conclusion".to_string(),
+                                Value::String(conclusion.to_string()),
+                            );
+                            json_map.insert(
+                                "completed_at".to_string(),
+                                Value::String(completed_at.to_string()),
+                            );
                             let json = Value::Object(json_map);
 
                             let mut token = app.access_token.write().await;
@@ -256,10 +388,14 @@ async fn webhook(
                                         tracing::info!("Updated check run {cr_id} to completed for workflow {id}");
 
                                         let mut conn = pool.get().await.unwrap();
-                                        let _: usize = cmd("Del").arg(format!("workflow_cr.{id}")).query_async(&mut *conn).await.unwrap();
+                                        let _: usize = cmd("Del")
+                                            .arg(format!("workflow_cr.{id}"))
+                                            .query_async(&mut *conn)
+                                            .await
+                                            .unwrap();
                                     }
-                                    err => tracing::error!("Check run api error '{url}': {err}")
-                                }
+                                    err => tracing::error!("Check run api error '{url}': {err}"),
+                                },
                                 Err(err) => tracing::error!("Check run api error '{url}': {err}"),
                             }
                         }
@@ -277,10 +413,7 @@ async fn webhook(
 }
 
 fn author_association_allowed(association: &str) -> bool {
-    match association {
-        "OWNER" | "MEMBER" | "COLLABORATOR" => true,
-        _ => false
-    }
+    matches!(association, "OWNER" | "MEMBER" | "COLLABORATOR")
 }
 
 async fn check_app_id(app: &AppState, pool: &ConnectionPool, payload: &Value) {

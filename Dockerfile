@@ -1,10 +1,8 @@
 # syntax=docker/dockerfile:1.4
 FROM rust:alpine as builder
 ARG TARGETARCH
-ARG BUILD_PROFILE=dev
-
-ENV CARGO_TERM_COLOR=always
-ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+ARG BUILD_PROFILE=release
+ARG CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 WORKDIR /app-build
 RUN mkdir -p /app-bin
